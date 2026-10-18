@@ -120,7 +120,7 @@ video.result{width:100%;max-height:52vh;border-radius:16px;background:#000}
 (function(){
 'use strict';
 const CLIPS=window.CLIPS;
-const APP_VERSION='v. 1.0.03'; // 시험판 버전: 고칠 때마다 올리기
+const APP_VERSION='v. 1.0.04'; // 시험판 버전: 고칠 때마다 올리기
 document.querySelectorAll('.ver').forEach(e=>e.textContent=APP_VERSION);
 
 /* ===== 1. 대화 대본 (책 내용으로 바꿀 부분) =====
@@ -245,19 +245,26 @@ function matchAns(t,expect){return norm(t).find(w=>expect.includes(w));}
    안드로이드는 결과 목록이 쌓이지 않고 같은 자리에 덮어써서, 목록 위치로 거르면 안 됨 */
 const IS_ANDROID=/Android/i.test(navigator.userAgent);
 let recog=null,micOn=false,recRunning=false,listener=null,sess=0,acceptFrom=Infinity,fastEnds=0,recStartedAt=0;
-const diagEl=$('diag');
-function diag(t){diagEl.textContent='마이크: '+t;}
+let useTrack=true,startedWithTrack=false,selfAbort=false;
+// 시험용 상태 줄: 지워지지 않게 최근 4개를 쌓아서 보여 줌 (같은 말이 이어지면 한 번만)
+const diagEl=$('diag'),diagLog=[];
+function diag(t){if(diagLog[diagLog.length-1]===t)return;diagLog.push(t);if(diagLog.length>4)diagLog.shift();diagEl.textContent='마이크: '+diagLog.join(' → ');}
 function micStart(){
   if(!srWorks||micOn)return;
   micOn=true;
   recog=new SR(); recog.lang='en-US'; recog.interimResults=true; recog.maxAlternatives=5; recog.continuous=true;
-  recog.onstart=()=>{recRunning=true;sess++;diag(IS_ANDROID&&camStream?'켜짐 (녹화 마이크 연결)':'켜짐');};
+  recog.onstart=()=>{recRunning=true;sess++;diag(startedWithTrack?'켜짐(녹화 마이크)':'켜짐');};
   recog.onaudiostart=()=>diag('듣는 중');
   recog.onspeechstart=()=>diag('말소리 감지');
   recog.onresult=e=>{fastEnds=0;const r=e.results[e.results.length-1];diag('들림 “'+(r&&r[0]?r[0].transcript.trim():'')+'”');if(listener&&sess>=acceptFrom)listener(e);};
-  recog.onerror=e=>{diag('오류 '+e.error);if(e.error==='not-allowed'||e.error==='service-not-allowed'||e.error==='audio-capture'){srWorks=false;micOn=false;if(listener)listener(null);}};
+  recog.onerror=e=>{
+    if(e.error==='aborted'&&selfAbort)return; // 아이 차례라서 일부러 끊은 것
+    diag('오류 '+e.error);
+    // 녹화 마이크 연결 방식이 안 되면 보통 방식으로 바꿔서 다시 시도
+    if(startedWithTrack&&e.error!=='no-speech'&&e.error!=='aborted'){useTrack=false;diag('보통 방식으로 바꿈');return;}
+    if(e.error==='not-allowed'||e.error==='service-not-allowed'||e.error==='audio-capture'){srWorks=false;micOn=false;if(listener)listener(null);}};
   recog.onend=()=>{
-    recRunning=false;
+    recRunning=false;selfAbort=false;
     if(!micOn){diag('꺼짐');return;}
     // 켜자마자 바로 꺼지는 일이 계속되면 포기 (무한 재시작 방지)
     if(performance.now()-recStartedAt<1000&&++fastEnds>=5){srWorks=false;micOn=false;diag('계속 꺼져서 멈춤');if(listener)listener(null);return;}
@@ -270,16 +277,17 @@ function micKick(){
   recStartedAt=performance.now();
   // 안드로이드: 카메라 녹화가 마이크를 차지하면 음성 인식엔 소리가 안 들어감.
   // 그래서 녹화용 마이크 소리를 음성 인식에 직접 넘겨줌 (최신 Chrome 지원. 안 되면 보통 방식으로)
-  const tr=IS_ANDROID&&camStream&&camStream.getAudioTracks()[0];
+  const tr=useTrack&&IS_ANDROID&&camStream&&camStream.getAudioTracks()[0];
   if(tr&&tr.readyState==='live'){
-    try{recog.start(tr);recRunning=true;diag('켜는 중 (녹화 마이크 연결)');return;}catch(e){}
+    try{recog.start(tr);recRunning=true;startedWithTrack=true;return;}catch(e){useTrack=false;diag('녹화 마이크 연결 불가 '+e.name);}
   }
+  startedWithTrack=false;
   try{recog.start();recRunning=true;}catch(e){diag('시작 실패 '+e.name);}
 }
 // 아이 차례: 지금 듣던 것을 끊고 새로 듣기 시작. 새로 시작된 뒤의 결과만 받음
 function micFresh(){
   acceptFrom=sess+1;
-  if(recRunning){try{recog.abort();}catch(e){}}else micKick();
+  if(recRunning){selfAbort=true;try{recog.abort();}catch(e){}}else micKick();
 }
 function micStop(){micOn=false;listener=null;try{recog&&recog.abort();}catch(e){}}
 function listen(expect){
