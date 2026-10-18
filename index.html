@@ -120,7 +120,7 @@ video.result{width:100%;max-height:52vh;border-radius:16px;background:#000}
 (function(){
 'use strict';
 const CLIPS=window.CLIPS;
-const APP_VERSION='v. 1.0.02'; // 시험판 버전: 고칠 때마다 올리기
+const APP_VERSION='v. 1.0.03'; // 시험판 버전: 고칠 때마다 올리기
 document.querySelectorAll('.ver').forEach(e=>e.textContent=APP_VERSION);
 
 /* ===== 1. 대화 대본 (책 내용으로 바꿀 부분) =====
@@ -243,6 +243,7 @@ function matchAns(t,expect){return norm(t).find(w=>expect.includes(w));}
    (질문마다 새로 만들면 마이크 허용 창이 반복됨)
    아이 차례가 시작될 때마다 듣기를 새로 시작해서, 그 전에 들린 말(규리 목소리)은 섞이지 않게 함.
    안드로이드는 결과 목록이 쌓이지 않고 같은 자리에 덮어써서, 목록 위치로 거르면 안 됨 */
+const IS_ANDROID=/Android/i.test(navigator.userAgent);
 let recog=null,micOn=false,recRunning=false,listener=null,sess=0,acceptFrom=Infinity,fastEnds=0,recStartedAt=0;
 const diagEl=$('diag');
 function diag(t){diagEl.textContent='마이크: '+t;}
@@ -250,7 +251,7 @@ function micStart(){
   if(!srWorks||micOn)return;
   micOn=true;
   recog=new SR(); recog.lang='en-US'; recog.interimResults=true; recog.maxAlternatives=5; recog.continuous=true;
-  recog.onstart=()=>{recRunning=true;sess++;diag('켜짐');};
+  recog.onstart=()=>{recRunning=true;sess++;diag(IS_ANDROID&&camStream?'켜짐 (녹화 마이크 연결)':'켜짐');};
   recog.onaudiostart=()=>diag('듣는 중');
   recog.onspeechstart=()=>diag('말소리 감지');
   recog.onresult=e=>{fastEnds=0;const r=e.results[e.results.length-1];diag('들림 “'+(r&&r[0]?r[0].transcript.trim():'')+'”');if(listener&&sess>=acceptFrom)listener(e);};
@@ -267,6 +268,12 @@ function micStart(){
 function micKick(){
   if(!micOn||recRunning)return;
   recStartedAt=performance.now();
+  // 안드로이드: 카메라 녹화가 마이크를 차지하면 음성 인식엔 소리가 안 들어감.
+  // 그래서 녹화용 마이크 소리를 음성 인식에 직접 넘겨줌 (최신 Chrome 지원. 안 되면 보통 방식으로)
+  const tr=IS_ANDROID&&camStream&&camStream.getAudioTracks()[0];
+  if(tr&&tr.readyState==='live'){
+    try{recog.start(tr);recRunning=true;diag('켜는 중 (녹화 마이크 연결)');return;}catch(e){}
+  }
   try{recog.start();recRunning=true;}catch(e){diag('시작 실패 '+e.name);}
 }
 // 아이 차례: 지금 듣던 것을 끊고 새로 듣기 시작. 새로 시작된 뒤의 결과만 받음
