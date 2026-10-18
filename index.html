@@ -120,7 +120,7 @@ video.result{width:100%;max-height:52vh;border-radius:16px;background:#000}
 (function(){
 'use strict';
 const CLIPS=window.CLIPS;
-const APP_VERSION='v. 1.0.05'; // 시험판 버전: 고칠 때마다 올리기
+const APP_VERSION='v. 1.0.06'; // 시험판 버전: 고칠 때마다 올리기
 document.querySelectorAll('.ver').forEach(e=>e.textContent=APP_VERSION);
 
 /* ===== 1. 대화 대본 (책 내용으로 바꿀 부분) =====
@@ -312,10 +312,12 @@ const VOSK_MIN_CONF=0.6; // 이보다 자신 없는 단어는 버림
 function voskListen(onText){
   const rec=new voskModel.KaldiRecognizer(AC.sampleRate,JSON.stringify([...VOSK_WORDS,'[unk]']));
   rec.setWords(true);
-  rec.on('partialresult',m=>{const t=m.result.partial;if(t){heardEl.textContent='“'+t+'”';diag('들리는 중 “'+t+'”');}});
+  // [unk] = 알아들을 단어 목록에 없는 말. 화면에는 "…"로 보여 줌
+  const shown=t=>t.split(' ').map(w=>w==='[unk]'?'…':w).join(' ').replace(/(… ?)+/g,'… ').trim();
+  rec.on('partialresult',m=>{const t=m.result.partial;if(t){heardEl.textContent='“'+shown(t)+'”';diag('들리는 중 “'+shown(t)+'”');}});
   rec.on('result',m=>{
     const ws=(m.result.result||[]).filter(w=>w.conf>=VOSK_MIN_CONF&&w.word!=='[unk]').map(w=>w.word);
-    if(m.result.text)diag('들림 “'+m.result.text+'” → “'+ws.join(' ')+'”');
+    if(m.result.text)diag('들림 “'+shown(m.result.text)+'”');
     if(ws.length)onText([ws.join(' ')],true);});
   voskRec=rec; diag('듣는 중 (휴대폰 안 인식기)');
   return ()=>{if(voskRec===rec)voskRec=null;try{rec.remove();}catch(e){}};
