@@ -17,6 +17,7 @@ body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15p
 .app{height:100%;max-width:520px;margin:0 auto;display:flex;flex-direction:column;padding-inline:16px;padding-block:10px 14px;box-sizing:border-box;gap:10px}
 .bar{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px}
 .bar h1{font-family:var(--display);font-weight:400;font-size:17px;margin:0;white-space:nowrap}
+.ver{font-family:var(--body);font-size:11px;color:var(--muted);margin-left:4px}
 .rec{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
 .rec i{width:9px;height:9px;border-radius:50%;background:#cfd5db}
 .rec.on{color:var(--rec)} .rec.on i{background:var(--rec);animation:pulse 1s infinite}
@@ -65,7 +66,7 @@ video.result{width:100%;max-height:52vh;border-radius:16px;background:#000}
 <div class="app">
   <div class="bar">
     <div class="rec" id="rec"><i></i><span id="recTxt">녹화 대기</span></div>
-    <h1>영어 대화</h1>
+    <h1>영어 대화<span class="ver"></span></h1>
     <button class="ghost" id="endBtn" type="button">끝내기</button>
   </div>
   <div class="stage">
@@ -83,6 +84,7 @@ video.result{width:100%;max-height:52vh;border-radius:16px;background:#000}
 
 <div class="sheet" id="startSheet">
   <div class="card">
+    <span class="ver" style="margin:0"></span>
     <h2>영상통화처럼 영어로 대화해요</h2>
     <p>규리가 책에 나온 질문을 하면, 아이가 영어로 대답해요. 대화하는 모습은 영상으로 녹화돼요.</p>
     <div class="name"><label for="childName">아이 이름</label><input id="childName" value="아람" readonly></div>
@@ -117,6 +119,8 @@ video.result{width:100%;max-height:52vh;border-radius:16px;background:#000}
 (function(){
 'use strict';
 const CLIPS=window.CLIPS;
+const APP_VERSION='v. 1.0.01'; // 시험판 버전: 고칠 때마다 올리기
+document.querySelectorAll('.ver').forEach(e=>e.textContent=APP_VERSION);
 
 /* ===== 1. 대화 대본 (책 내용으로 바꿀 부분) =====
    say: 캐릭터가 하는 말 (미리 녹음된 클립 id)
