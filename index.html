@@ -234,26 +234,52 @@ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 let srWorks=!!SR, pending=null;
 function norm(s){return s.toLowerCase().replace(/[^a-z.\s]/g,' ').split(/\s+/).filter(Boolean).map(w=>SOUNDALIKE[w]||w);}
 function matchAns(t,expect){return norm(t).find(w=>expect.includes(w));}
+/* 음성 인식기는 시작할 때 한 번만 켜서 대화가 끝날 때까지 계속 켜 둠.
+   (질문마다 새로 켜면 안드로이드에서 마이크 허용 창·알림음이 반복됨)
+   아이 차례가 아닐 때 들린 말(규리 목소리 포함)은 버림 */
+let recog=null,micOn=false,listener=null,resLen=0,fastEnds=0,recStartedAt=0;
+function micStart(){
+  if(!srWorks||micOn)return;
+  micOn=true;
+  recog=new SR(); recog.lang='en-US'; recog.interimResults=true; recog.maxAlternatives=5; recog.continuous=true;
+  recog.onresult=e=>{resLen=e.results.length;fastEnds=0;if(listener)listener(e);};
+  recog.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'||e.error==='audio-capture'){srWorks=false;micOn=false;if(listener)listener(null);}};
+  recog.onend=()=>{
+    resLen=0;
+    if(!micOn)return;
+    // 켜자마자 바로 꺼지는 일이 계속되면 포기 (무한 재시작 방지)
+    if(performance.now()-recStartedAt<1000&&++fastEnds>=5){srWorks=false;micOn=false;if(listener)listener(null);return;}
+    setTimeout(micKick,250);
+  };
+  micKick();
+}
+function micKick(){
+  if(!micOn)return;
+  recStartedAt=performance.now();
+  try{recog.start();}catch(e){}
+}
+function micStop(){micOn=false;listener=null;try{recog&&recog.abort();}catch(e){}}
 function listen(expect){
   return new Promise(resolve=>{
-    let done=false,rec=null,restarts=0,timer=null,quiet=null,got=null;
-    const finish=r=>{if(done)return;done=true;clearTimeout(timer);clearTimeout(quiet);try{rec&&rec.abort();}catch(e){}pending=null;listenEl.hidden=true;okBtn.disabled=retryBtn.disabled=true;resolve(r);};
+    let done=false,timer=null,quiet=null,got=null;
+    const finish=r=>{if(done)return;done=true;clearTimeout(timer);clearTimeout(quiet);listener=null;pending=null;listenEl.hidden=true;okBtn.disabled=retryBtn.disabled=true;resolve(r);};
     pending=finish; heardEl.textContent=''; listenEl.hidden=false; okBtn.disabled=retryBtn.disabled=false;
     $('listenTxt').textContent=$('childName').value+'이 차례예요';
+    const noSR=()=>{clearTimeout(timer);hintEl.textContent='이 브라우저에서는 음성 인식을 쓸 수 없어요. 아이가 대답하면 버튼을 눌러 주세요.';};
     if(!srWorks){hintEl.textContent='아이가 대답하면 잘 대답했어요 버튼을 눌러 주세요.';return;}
     hintEl.textContent='듣고 있어요. 인식이 안 되면 버튼을 눌러 주세요.';
     timer=setTimeout(()=>finish({ok:false,timeout:true}),LISTEN_MS);
-    const startRec=()=>{
-      rec=new SR(); rec.lang='en-US'; rec.interimResults=true; rec.maxAlternatives=5; rec.continuous=false;
-      rec.onresult=e=>{for(let ri=0;ri<e.results.length;ri++){const r=e.results[ri];for(let a=0;a<r.length;a++){const tx=r[a].transcript;if(a===0)heardEl.textContent='“'+tx.trim()+'”';const w=matchAns(tx,expect);if(w&&!got){got=w;}}
+    // 지금 이 순간까지 쌓인 결과(규리가 말할 때 들린 것)는 무시
+    let base=resLen;
+    listener=e=>{
+      if(!e){noSR();return;}
+      if(e.results.length<base)base=0; // 인식기가 다시 켜져서 결과가 새로 시작됨
+      for(let ri=Math.max(base,e.resultIndex);ri<e.results.length;ri++){const r=e.results[ri];for(let a=0;a<r.length;a++){const tx=r[a].transcript;if(a===0)heardEl.textContent='“'+tx.trim()+'”';const w=matchAns(tx,expect);if(w&&!got){got=w;}}
         if(got){heardEl.textContent='“'+got+'”';clearTimeout(timer);clearTimeout(quiet);
           if(r.isFinal){finish({ok:true,word:got});return;}
-          quiet=setTimeout(()=>finish({ok:true,word:got}),END_SILENCE);}}};
-      rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'||e.error==='audio-capture'){srWorks=false;clearTimeout(timer);hintEl.textContent='이 브라우저에서는 음성 인식을 쓸 수 없어요. 아이가 대답하면 버튼을 눌러 주세요.';}};
-      rec.onend=()=>{if(done)return;if(got){finish({ok:true,word:got});return;}if(srWorks&&restarts++<6){try{startRec();}catch(e){}}};
-      try{rec.start();}catch(e){srWorks=false;clearTimeout(timer);}
+          quiet=setTimeout(()=>finish({ok:true,word:got}),END_SILENCE);}}
     };
-    startRec();
+    if(!micOn)micStart();
   });
 }
 okBtn.addEventListener('click',()=>pending&&pending({ok:true,by:'parent'}));
@@ -397,6 +423,7 @@ async function begin(withCam){
   try{wakeLock=await navigator.wakeLock?.request('screen');}catch(e){}
   if(camStream){try{startRecording();}catch(e){hintEl.textContent='녹화를 시작하지 못했어요. 대화는 계속할 수 있어요.';}}
   else recTxt.textContent='녹화 없음 (미리보기)';
+  micStart(); // 마이크 허용은 여기서 한 번만
   runLesson();
 }
 $('startCam').addEventListener('click',()=>begin(true));
@@ -405,6 +432,7 @@ $('endBtn').addEventListener('click',()=>{if(!running){endSession();return;}stop
 
 async function endSession(){
   if($('endSheet').hidden===false)return;
+  micStop();
   const blob=await stopRecording();
   try{wakeLock&&wakeLock.release();}catch(e){}
   const vid=$('result'),msg=$('endMsg');
