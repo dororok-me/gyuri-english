@@ -120,7 +120,7 @@ video.result{width:100%;max-height:52vh;border-radius:16px;background:#000}
 (function(){
 'use strict';
 const CLIPS=window.CLIPS;
-const APP_VERSION='v. 1.0.04'; // 시험판 버전: 고칠 때마다 올리기
+const APP_VERSION='v. 1.0.05'; // 시험판 버전: 고칠 때마다 올리기
 document.querySelectorAll('.ver').forEach(e=>e.textContent=APP_VERSION);
 
 /* ===== 1. 대화 대본 (책 내용으로 바꿀 부분) =====
@@ -245,7 +245,7 @@ function matchAns(t,expect){return norm(t).find(w=>expect.includes(w));}
    안드로이드는 결과 목록이 쌓이지 않고 같은 자리에 덮어써서, 목록 위치로 거르면 안 됨 */
 const IS_ANDROID=/Android/i.test(navigator.userAgent);
 let recog=null,micOn=false,recRunning=false,listener=null,sess=0,acceptFrom=Infinity,fastEnds=0,recStartedAt=0;
-let useTrack=true,startedWithTrack=false,selfAbort=false;
+let selfAbort=false;
 // 시험용 상태 줄: 지워지지 않게 최근 4개를 쌓아서 보여 줌 (같은 말이 이어지면 한 번만)
 const diagEl=$('diag'),diagLog=[];
 function diag(t){if(diagLog[diagLog.length-1]===t)return;diagLog.push(t);if(diagLog.length>4)diagLog.shift();diagEl.textContent='마이크: '+diagLog.join(' → ');}
@@ -253,15 +253,13 @@ function micStart(){
   if(!srWorks||micOn)return;
   micOn=true;
   recog=new SR(); recog.lang='en-US'; recog.interimResults=true; recog.maxAlternatives=5; recog.continuous=true;
-  recog.onstart=()=>{recRunning=true;sess++;diag(startedWithTrack?'켜짐(녹화 마이크)':'켜짐');};
+  recog.onstart=()=>{recRunning=true;sess++;diag('켜짐');};
   recog.onaudiostart=()=>diag('듣는 중');
   recog.onspeechstart=()=>diag('말소리 감지');
   recog.onresult=e=>{fastEnds=0;const r=e.results[e.results.length-1];diag('들림 “'+(r&&r[0]?r[0].transcript.trim():'')+'”');if(listener&&sess>=acceptFrom)listener(e);};
   recog.onerror=e=>{
     if(e.error==='aborted'&&selfAbort)return; // 아이 차례라서 일부러 끊은 것
     diag('오류 '+e.error);
-    // 녹화 마이크 연결 방식이 안 되면 보통 방식으로 바꿔서 다시 시도
-    if(startedWithTrack&&e.error!=='no-speech'&&e.error!=='aborted'){useTrack=false;diag('보통 방식으로 바꿈');return;}
     if(e.error==='not-allowed'||e.error==='service-not-allowed'||e.error==='audio-capture'){srWorks=false;micOn=false;if(listener)listener(null);}};
   recog.onend=()=>{
     recRunning=false;selfAbort=false;
@@ -275,13 +273,6 @@ function micStart(){
 function micKick(){
   if(!micOn||recRunning)return;
   recStartedAt=performance.now();
-  // 안드로이드: 카메라 녹화가 마이크를 차지하면 음성 인식엔 소리가 안 들어감.
-  // 그래서 녹화용 마이크 소리를 음성 인식에 직접 넘겨줌 (최신 Chrome 지원. 안 되면 보통 방식으로)
-  const tr=useTrack&&IS_ANDROID&&camStream&&camStream.getAudioTracks()[0];
-  if(tr&&tr.readyState==='live'){
-    try{recog.start(tr);recRunning=true;startedWithTrack=true;return;}catch(e){useTrack=false;diag('녹화 마이크 연결 불가 '+e.name);}
-  }
-  startedWithTrack=false;
   try{recog.start();recRunning=true;}catch(e){diag('시작 실패 '+e.name);}
 }
 // 아이 차례: 지금 듣던 것을 끊고 새로 듣기 시작. 새로 시작된 뒤의 결과만 받음
@@ -290,22 +281,67 @@ function micFresh(){
   if(recRunning){selfAbort=true;try{recog.abort();}catch(e){}}else micKick();
 }
 function micStop(){micOn=false;listener=null;try{recog&&recog.abort();}catch(e){}}
+/* 안드로이드 + 카메라 녹화: Chrome 음성 인식은 녹화가 마이크를 쓰는 동안 소리를 못 받음.
+   그래서 이때만 페이지 안에서 돌아가는 무료 음성 인식(Vosk)을 씀. 녹화용 마이크 소리를 그대로 받아서 인식함.
+   인식 모델(약 41MB)은 처음 한 번만 받고, 그 뒤엔 휴대폰에 저장된 것을 씀 */
+const VOSK_JS='vosk/vosk.js', VOSK_MODEL='vosk/vosk-model-small-en-us-0.15.tar.gz';
+let voskModel=null,voskRec=null,voskNode=null;
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('script'));document.head.appendChild(s);});}
+async function loadVosk(){
+  await loadScript(VOSK_JS);
+  // 인식기는 별도 작업 공간(worker)에서 모델을 받으므로 전체 주소로 넘김
+  // (Vosk.createModel은 실패해도 알려 주지 않고 계속 기다려서, 실패 소식을 직접 받음)
+  const model=await new Promise((res,rej)=>{
+    const m=new Vosk.Model(new URL(VOSK_MODEL,location.href).href);
+    m.on('load',x=>x.result?res(m):rej(new Error('load')));
+    m.on('error',x=>rej(new Error(x.error||'error')));
+    setTimeout(()=>rej(new Error('timeout')),240000);
+  });
+  // 녹화용 마이크 소리를 인식기로 흘려보냄 (스피커로는 안 나감)
+  const src=AC.createMediaStreamSource(camStream), mute=AC.createGain(); mute.gain.value=0;
+  voskNode=AC.createScriptProcessor(4096,1,1);
+  voskNode.onaudioprocess=e=>{if(voskRec){try{voskRec.acceptWaveform(e.inputBuffer);}catch(err){}}};
+  src.connect(voskNode); voskNode.connect(mute); mute.connect(AC.destination);
+  voskModel=model;
+}
+// 알아들을 단어를 대본의 정답 단어 + 자주 쓰는 말로 좁혀서 아이 발음도 잘 잡게 함.
+// (정답 단어만 주면 아무 말이나 정답 단어로 억지로 맞춰 버림: "Great job" → "green")
+const VOSK_WORDS=[...new Set([...SCRIPT.flatMap(s=>s.expect||[]),'i','like','my','favorite','color','is','it','am','feel','feeling','so','very','and','the','a','job','yes','no','hi','hello','thank','you'])];
+const VOSK_MIN_CONF=0.6; // 이보다 자신 없는 단어는 버림
+// 끝내는 함수를 돌려줌
+function voskListen(onText){
+  const rec=new voskModel.KaldiRecognizer(AC.sampleRate,JSON.stringify([...VOSK_WORDS,'[unk]']));
+  rec.setWords(true);
+  rec.on('partialresult',m=>{const t=m.result.partial;if(t){heardEl.textContent='“'+t+'”';diag('들리는 중 “'+t+'”');}});
+  rec.on('result',m=>{
+    const ws=(m.result.result||[]).filter(w=>w.conf>=VOSK_MIN_CONF&&w.word!=='[unk]').map(w=>w.word);
+    if(m.result.text)diag('들림 “'+m.result.text+'” → “'+ws.join(' ')+'”');
+    if(ws.length)onText([ws.join(' ')],true);});
+  voskRec=rec; diag('듣는 중 (휴대폰 안 인식기)');
+  return ()=>{if(voskRec===rec)voskRec=null;try{rec.remove();}catch(e){}};
+}
 function listen(expect){
   return new Promise(resolve=>{
-    let done=false,timer=null,quiet=null,got=null;
-    const finish=r=>{if(done)return;done=true;clearTimeout(timer);clearTimeout(quiet);listener=null;pending=null;listenEl.hidden=true;okBtn.disabled=retryBtn.disabled=true;resolve(r);};
+    let done=false,timer=null,quiet=null,got=null,stopVosk=null;
+    const finish=r=>{if(done)return;done=true;clearTimeout(timer);clearTimeout(quiet);listener=null;if(stopVosk)stopVosk();pending=null;listenEl.hidden=true;okBtn.disabled=retryBtn.disabled=true;resolve(r);};
     pending=finish; heardEl.textContent=''; listenEl.hidden=false; okBtn.disabled=retryBtn.disabled=false;
     $('listenTxt').textContent=$('childName').value+'이 차례예요';
     const noSR=()=>{clearTimeout(timer);hintEl.textContent='이 브라우저에서는 음성 인식을 쓸 수 없어요. 아이가 대답하면 버튼을 눌러 주세요.';};
     if(!srWorks){hintEl.textContent='아이가 대답하면 잘 대답했어요 버튼을 눌러 주세요.';return;}
     hintEl.textContent='듣고 있어요. 인식이 안 되면 버튼을 눌러 주세요.';
     timer=setTimeout(()=>finish({ok:false,timeout:true}),LISTEN_MS);
+    // texts: 들린 말 후보들 (첫 번째를 화면에 보여 줌)
+    const onText=(texts,isFinal)=>{
+      if(done)return;
+      texts.forEach((tx,a)=>{if(a===0)heardEl.textContent='“'+tx.trim()+'”';const w=matchAns(tx,expect);if(w&&!got)got=w;});
+      if(got){heardEl.textContent='“'+got+'”';clearTimeout(timer);clearTimeout(quiet);
+        if(isFinal){finish({ok:true,word:got});return;}
+        quiet=setTimeout(()=>finish({ok:true,word:got}),END_SILENCE);}
+    };
+    if(voskModel){stopVosk=voskListen(onText);return;}
     listener=e=>{
       if(!e){noSR();return;}
-      for(let ri=0;ri<e.results.length;ri++){const r=e.results[ri];for(let a=0;a<r.length;a++){const tx=r[a].transcript;if(a===0)heardEl.textContent='“'+tx.trim()+'”';const w=matchAns(tx,expect);if(w&&!got){got=w;}}
-        if(got){heardEl.textContent='“'+got+'”';clearTimeout(timer);clearTimeout(quiet);
-          if(r.isFinal){finish({ok:true,word:got});return;}
-          quiet=setTimeout(()=>finish({ok:true,word:got}),END_SILENCE);}}
+      for(let ri=0;ri<e.results.length;ri++){const r=e.results[ri];onText(Array.from(r,x=>x.transcript),r.isFinal);}
     };
     if(!micOn)micStart();
     micFresh();
@@ -434,6 +470,15 @@ requestAnimationFrame(tick);
 
 /* ===== 10. 시작 / 끝 ===== */
 let lastBlobUrl=null,lastBlob=null;
+// 시작 화면에서 인식 모델을 받는 동안 기다리는 시간을 보여 줌. 실패하면 버튼으로 진행
+async function prepVosk(){
+  const b=$('startCam'),t0=Date.now();
+  b.disabled=$('startNoCam').disabled=true;
+  const tick=setInterval(()=>{b.textContent='음성 인식 준비 중… '+Math.round((Date.now()-t0)/1000)+'초 (처음 한 번만 오래 걸려요)';},500);
+  try{await loadVosk();}
+  catch(e){srWorks=false;hintEl.textContent='음성 인식을 준비하지 못했어요. 아이가 대답하면 버튼을 눌러 주세요.';diag('인식기 준비 실패 '+(e&&e.message||''));}
+  finally{clearInterval(tick);}
+}
 async function begin(withCam){
   const err=$('startErr'); err.hidden=true;
   try{
@@ -442,6 +487,7 @@ async function begin(withCam){
       await openCamera();
     }
     await initAudio();
+    if(IS_ANDROID&&camStream)await prepVosk();
   }catch(e){
     err.hidden=false;
     err.textContent=e&&e.message==='nodev'?'이 화면에서는 카메라 녹화를 쓸 수 없어요. 녹화 없이 미리 해보기를 눌러 주세요.':'카메라나 마이크 허용이 거절됐어요. 브라우저 설정에서 허용한 뒤 다시 눌러 주세요. 녹화 없이 해볼 수도 있어요.';
@@ -452,7 +498,7 @@ async function begin(withCam){
   try{wakeLock=await navigator.wakeLock?.request('screen');}catch(e){}
   if(camStream){try{startRecording();}catch(e){hintEl.textContent='녹화를 시작하지 못했어요. 대화는 계속할 수 있어요.';}}
   else recTxt.textContent='녹화 없음 (미리보기)';
-  micStart(); // 마이크 허용은 여기서 한 번만
+  if(!voskModel)micStart(); // 마이크 허용은 여기서 한 번만
   runLesson();
 }
 $('startCam').addEventListener('click',()=>begin(true));
