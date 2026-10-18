@@ -1,5 +1,5 @@
 """규리 대사 → 녹음(mp3 data URI) + 단어 시간 + 입모양 키 + 음량 (index.html CLIPS 형식)
-목소리: Kokoro af_heart, 속도 0.85, 음 높이 1.25배 (원래 규리 목소리와 맞춘 값)"""
+목소리: Kokoro af_heart (원래 품질 모델), 속도 0.75, 음 높이 1.25배 (v1.0.08에서 사용자가 고른 값)"""
 import sys,os,json,re,base64,subprocess,wave,numpy as np,soundfile as sf
 from kokoro_onnx import Kokoro
 from vosk import Model,KaldiRecognizer,SetLogLevel
@@ -9,8 +9,8 @@ EspeakWrapper.set_library(espeakng_loader.get_library_path()); EspeakWrapper.set
 from phonemizer import phonemize
 SetLogLevel(-1)
 S=sys.argv[1]; OUT=f'{S}/clips'; os.makedirs(OUT,exist_ok=True)
-VOICE,SPEED,PITCH='af_heart',0.85,1.25
-K=Kokoro(f'{S}/kok/model_q8.onnx',f'{S}/kok/voices.npz')
+VOICE,SPEED,PITCH='af_heart',0.75,1.25
+K=Kokoro(f'{S}/kok/kokoro-v1.0.onnx',f'{S}/kok/voices-v1.0.bin')
 VM=Model(f'{S}/vmodel/'+[d for d in os.listdir(f'{S}/vmodel') if not d.startswith('.')][0]) if not os.path.exists(f'{S}/vmodel/am') else Model(f'{S}/vmodel')
 def ff(*a): subprocess.run(['ffmpeg','-loglevel','error','-y',*a],check=True)
 V={'p':'MBP','b':'MBP','m':'MBP','f':'FV','v':'FV','θ':'DD','ð':'DD','t':'DD','d':'DD','n':'DD','l':'DD','ɾ':'DD','k':'KK','ɡ':'KK','g':'KK','ŋ':'KK','h':'KK',

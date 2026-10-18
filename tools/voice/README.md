@@ -1,9 +1,10 @@
 # 규리 목소리 만들기
 
-규리 목소리는 무료 TTS **Kokoro**로 만들어요. 원래 규리 녹음과 맞춘 값:
+규리 목소리는 무료 TTS **Kokoro**로 만들어요. v. 1.0.08부터 대사 전체를 이 값으로 통일했어요:
 
+- 모델: 원래 품질 모델 `kokoro-v1.0.onnx` + `voices-v1.0.bin` (github.com/thewh1teagle/kokoro-onnx 릴리스 `model-files-v1.0`)
 - 목소리: `af_heart`
-- 속도: `0.85`
+- 속도: `0.75`
 - 음 높이: 1.25배 (`ffmpeg -af "asetrate=30000,aresample=24000,atempo=0.8"`)
 - 저장: mp3, 24kHz, 모노, 48kbps
 
@@ -12,11 +13,11 @@
 
 필요한 것 (앱에는 들어가지 않고, 목소리를 만들 때만 씀):
 - Python 패키지: `kokoro-onnx`, `soundfile`, `vosk`, `numpy`
-- Kokoro 모델(`model_q8.onnx`)과 목소리 파일(`voices.npz`): npm 패키지 `kokoro-q8-shards`, `kokoro-local-runtime`의 `voices/*.bin`
+- Kokoro 모델과 목소리 파일 (위 릴리스에서 받기). 용량을 줄인 q8 모델은 소리가 기계적이라 쓰지 않아요.
 - 단어 시간 맞추기용 Vosk 모델: `vosk/vosk-model-small-en-us-0.15.tar.gz` (앱에 있는 것)
 - `ffmpeg`
 
 ```
-python make_clip.py <작업폴더> lines.json   # → <작업폴더>/clips/clips.json
+python make_clip.py <작업폴더> lines.json   # lines.json = 규리 대사 전체   # → <작업폴더>/clips/clips.json
 ```
-작업폴더 안에 `kok/model_q8.onnx`, `kok/voices.npz`, `vmodel/`(Vosk 모델 압축 푼 것)가 있어야 해요.
+작업폴더 안에 `kok/kokoro-v1.0.onnx`, `kok/voices-v1.0.bin`, `vmodel/`(Vosk 모델 압축 푼 것)가 있어야 해요.
